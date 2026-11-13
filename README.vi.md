@@ -65,6 +65,7 @@ FoxProfile miễn phí, mã nguồn mở, được làm vào thời gian rảnh 
 - **Lọc và tìm kiếm**: lọc theo đang chạy, có/không proxy, engine Chrome (kèm số đếm); tìm theo tên hoặc proxy.
 - **Thao tác hàng loạt**: chọn nhiều profile để mở, dừng hoặc xóa cùng lúc.
 - **MCP server**: Claude, Cursor... tự mở profile, lướt web, click, gõ, chụp màn hình.
+- **Quay video tab** qua API và MCP: mỗi test case một clip WebM, để bàn giao một lượt QA bằng video.
 - **Chế độ server + web panel**: chạy trên VPS, quản lý và xem màn hình từ xa qua trình duyệt, có token bảo vệ.
 - **REST API** để điều khiển bằng script, có trang tài liệu Swagger.
 - Giao diện **tiếng Anh** (mặc định) và tiếng Việt, đổi ngay trong app. Font đóng gói sẵn, không cần mạng.
@@ -139,7 +140,7 @@ Hướng dẫn triển khai đầy đủ (Ubuntu, systemd, nginx, HTTPS): [docs/
 
 ## MCP: cho AI điều khiển trình duyệt
 
-FoxProfile có sẵn MCP server, để Claude Code, Claude Desktop, Cursor, VS Code... tự quản lý profile và thao tác trên trang: mở URL, đọc trang, click, gõ, chụp màn hình.
+FoxProfile có sẵn MCP server, để Claude Code, Claude Desktop, Cursor, VS Code... tự quản lý profile và thao tác trên trang: mở URL, đọc trang, click, gõ, chụp màn hình, quay video.
 
 **Cách nhanh nhất:** bấm **Kết nối AI (MCP)** ở thanh bên trái của app desktop hoặc web panel. Hộp thoại sinh sẵn cấu hình cho từng ứng dụng AI, đúng địa chỉ và token của bạn, chỉ cần bấm Sao chép rồi dán.
 
@@ -169,8 +170,21 @@ Sau đó chỉ cần nhắn AI, ví dụ: *"Mở profile tiktok-us-02, vào tikt
 | Cookie & fingerprint | `export_cookies`, `import_cookies`, `get_fingerprint`, `reset_fingerprint`, `check_proxy`, `check_profile_ip` |
 | Trang | `browser_navigate`, `browser_back`, `browser_snapshot`, `browser_get_text`, `browser_click`, `browser_click_at`, `browser_type`, `browser_press`, `browser_wait_for`, `browser_screenshot`, `browser_evaluate` |
 | Tab | `browser_tabs`, `browser_tab_new`, `browser_tab_select`, `browser_tab_close` |
+| Quay video | `browser_record_start`, `browser_record_stop` |
 
 MCP **không** có tool xóa profile, để AI không thể vô tình xóa cookie của tài khoản. Trang chỉ mở được `http`, `https` và `about:blank`; `file://` và `about:config` bị chặn.
+
+### Quay video một test case
+
+`browser_record_start(profile, name)` bắt đầu quay tab đang chọn; `browser_record_stop(profile)` lưu video thành `recordings/<profile>/<name>.webm` và trả về đường dẫn đó (tính từ thư mục FoxProfile đang chạy), thời lượng cùng link tải (`GET /api/v1/recordings/<profile>/<name>.webm`, dùng chung token với API). Mỗi profile chỉ quay một video một lúc, nên một lượt QA có một clip cho mỗi case. Video dùng screencast của Playwright: trình duyệt tự gửi khung hình (25 fps, theo kích thước tab, tối đa 1920×1080), không chèn gì vào trang, chạy được với cả hai engine.
+
+- Chỉ tab đang chọn lúc bắt đầu được quay. Không thể đóng tab đó qua API khi đang quay; nếu tab vẫn bị đóng, FoxProfile vẫn cố lưu phần video đến lúc đóng.
+- `stop_profile` lưu video đang quay dở và trả về nó.
+- Video tự dừng sau 60 phút, hoặc khi dung lượng đĩa trống còn dưới 1 GB (`FOXPROFILE_RECORDING_MAX_MINUTES`, `FOXPROFILE_RECORDING_MIN_FREE_MB`); lần gọi `browser_record_stop` kế tiếp trả về video đó kèm `stopped_by`.
+- Lần quay đầu tiên tải bản ffmpeg của Playwright (vài MB, từ CDN của Playwright; tiến độ hiện trong log). Muốn tải trước: `python -m playwright install ffmpeg`.
+- Video ghi lại mọi thứ hiện trên trang, kể cả tài khoản đang đăng nhập, và vẫn còn sau khi xóa profile. Hãy giữ `recordings/` cẩn thận như `camoufox_data/`: FoxProfile tạo thư mục này chỉ cho user của nó đọc được.
+
+Ví dụ: *"Mở profile qa-01, bắt đầu quay với tên login-ok, đăng nhập trên staging.example.com, rồi dừng quay và gửi tôi file video"*.
 
 ## Engine Chrome
 
@@ -204,6 +218,9 @@ Mọi cấu hình đều không bắt buộc. Muốn đổi thì sao chép `.env
 | `FOXPROFILE_LANG` | `en` | Ngôn ngữ giao diện: `en` hoặc `vi` |
 | `FOXPROFILE_PROFILES_FILE` | `profiles.json` | File lưu danh sách profile |
 | `FOXPROFILE_DATA_DIR` | `camoufox_data` | Thư mục dữ liệu, mỗi profile một thư mục con |
+| `FOXPROFILE_RECORDINGS_DIR` | `recordings` | Video đã quay, mỗi profile một thư mục con. Đặt đường dẫn tuyệt đối thì API cũng trả đường dẫn video tuyệt đối |
+| `FOXPROFILE_RECORDING_MAX_MINUTES` | `60` | Video tự dừng sau số phút này (`0`: không giới hạn) |
+| `FOXPROFILE_RECORDING_MIN_FREE_MB` | `1024` | Thư mục video còn trống ít hơn mức này thì không bắt đầu quay, hoặc dừng quay; thư mục tạm chỉ cần chưa gần đầy (`0`: không kiểm tra) |
 | `FOXPROFILE_LOG_DIR` | `logs` | Thư mục log |
 | `FOXPROFILE_LOG_LEVEL` | `INFO` | Mức log |
 | `FOXPROFILE_PROXY_TIMEOUT` | `10` | Thời gian chờ khi kiểm tra proxy (giây) |
@@ -226,11 +243,12 @@ camoufox_data/<tên-profile>/                      dữ liệu trình duyệt: c
 camoufox_data/<tên-profile>/fingerprint.json      fingerprint thiết bị (engine Camoufox)
 camoufox_data/<tên-profile>/chrome_persona.json   fingerprint thiết bị (engine Chrome)
 camoufox_data/<tên-profile>/tabs.json             các tab sẽ được mở lại
+recordings/<tên-profile>/<tên>.webm               video quay qua API / MCP
 logs/foxprofile_YYYYMMDD.log                      log theo ngày
 ```
 
 > [!WARNING]
-> `camoufox_data/` chứa cookie đăng nhập của mọi tài khoản. Không commit, không chia sẻ thư mục này.
+> `camoufox_data/` chứa cookie đăng nhập của mọi tài khoản, còn `recordings/` ghi lại những gì trang của chúng hiển thị. Không commit, không chia sẻ các thư mục này.
 
 ## REST API
 
@@ -251,7 +269,7 @@ Tiền tố: `/api/v1`. Xem đầy đủ tại `/docs` khi ứng dụng đang ch
 | `GET` | `/browser` | Danh sách profile đang chạy |
 | `GET` | `/browser/{name}/status` | Profile có đang chạy không |
 | `POST` | `/browser/{name}/launch` | Mở trình duyệt, chờ đến khi mở xong hoặc lỗi (409 nếu đang chạy hoặc đang bận) |
-| `POST` | `/browser/{name}/stop` | Đóng trình duyệt |
+| `POST` | `/browser/{name}/stop` | Đóng trình duyệt (video đang quay dở được lưu trước và trả về) |
 | `POST` | `/proxy/check` | Kiểm tra proxy |
 | `POST` | `/proxy/geo-check` | Như `ip-check` cho tổ hợp `{proxy, timezone, locale}` chưa lưu |
 | `POST` | `/browser/{name}/page/navigate` · `back` | Mở URL trong tab đang chọn, quay lại trang trước |
@@ -262,6 +280,9 @@ Tiền tố: `/api/v1`. Xem đầy đủ tại `/docs` khi ứng dụng đang ch
 | `POST` | `/browser/{name}/page/evaluate` | Chạy JavaScript |
 | `GET` / `POST` | `/browser/{name}/page/tabs` | Liệt kê / mở tab mới |
 | `POST` / `DELETE` | `/browser/{name}/page/tabs/{index}/select` · `/page/tabs/{index}` | Chọn / đóng tab |
+| `POST` | `/browser/{name}/page/record/start` · `record/stop` | Bắt đầu quay tab đang chọn (`{"name": "case-1"}`) / dừng và lưu thành WebM |
+| `GET` | `/browser/{name}/page/record` | Có đang quay không |
+| `GET` | `/recordings/{name}/{file}` | Tải video đã quay |
 | `GET` | `/mcp/setup?base_url=...` | Cấu hình MCP cho từng ứng dụng AI (dùng bởi hộp thoại Kết nối AI) |
 
 Khi có `FOXPROFILE_API_TOKEN`, mọi request (trừ `/health` và `/info`) phải gửi header `Authorization: Bearer <token>`.
@@ -280,6 +301,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/browser/tiktok-us-02/launch
 
 # Xuất cookie dạng cookies.txt
 curl "http://127.0.0.1:8000/api/v1/profiles/tiktok-us-02/cookies?format=netscape" -o cookies.txt
+
+# Quay video một test case rồi tải về
+curl -X POST http://127.0.0.1:8000/api/v1/browser/tiktok-us-02/page/record/start \
+  -H "Content-Type: application/json" -d '{"name": "login-ok"}'
+curl -X POST http://127.0.0.1:8000/api/v1/browser/tiktok-us-02/page/record/stop
+curl http://127.0.0.1:8000/api/v1/recordings/tiktok-us-02/login-ok.webm -o login-ok.webm
 ```
 
 ## Phát triển

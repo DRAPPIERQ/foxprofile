@@ -1,4 +1,4 @@
-"""Control the pages of a running profile: navigate, read, click, type, capture."""
+"""Control the pages of a running profile: navigate, read, click, type, capture, record."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from ...services.browser.launcher import BrowserControlError
+from ...services.browser.recording import START_TIMEOUT, STOP_TIMEOUT
 from ..dependencies import get_browser_launcher, get_profile_manager
-from ..helpers import require_profile
+from ..helpers import require_profile, with_download
 from ..schemas.page import (
     ClickAtRequest,
     ClickRequest,
@@ -17,6 +18,7 @@ from ..schemas.page import (
     KeyboardTypeRequest,
     NavigateRequest,
     PressRequest,
+    RecordStartRequest,
     TabNewRequest,
     TypeRequest,
     WaitRequest,
@@ -34,10 +36,11 @@ def _run(
     bl: IBrowserLauncher,
     action: str,
     params: dict[str, Any] | None = None,
+    timeout: float = 60,
 ) -> Any:
     require_profile(name, pm)
     try:
-        return bl.control(name, action, params or {})
+        return bl.control(name, action, params or {}, timeout=timeout)
     except BrowserControlError as e:
         raise HTTPException(status_code=e.status, detail=str(e)) from e
 
@@ -150,3 +153,24 @@ def tab_select(name: str, index: int, pm=_PM, bl=_BL) -> dict:
 @router.delete("/tabs/{index}")
 def tab_close(name: str, index: int, pm=_PM, bl=_BL) -> dict:
     return _run(name, pm, bl, "tab_close", {"index": index})
+
+
+@router.post("/record/start")
+def record_start(name: str, body: RecordStartRequest, pm=_PM, bl=_BL) -> dict:
+    """Start recording the active tab as a WebM video; one recording per profile.
+
+    The first recording on a machine may download Playwright's ffmpeg (a few MB).
+    """
+    result = _run(name, pm, bl, "record_start", body.model_dump(), timeout=START_TIMEOUT)
+    return with_download(name, result)
+
+
+@router.post("/record/stop")
+def record_stop(name: str, pm=_PM, bl=_BL) -> dict:
+    """Stop the recording and save it; `download` is the API path of the WebM."""
+    return with_download(name, _run(name, pm, bl, "record_stop", timeout=STOP_TIMEOUT))
+
+
+@router.get("/record")
+def record_status(name: str, pm=_PM, bl=_BL) -> dict:
+    return _run(name, pm, bl, "record_status")

@@ -13,6 +13,7 @@ from ...core.strings import get_string
 from ...models.profile import Profile
 from .control import TOKEN_HEADER
 from .process import spawn_browser, terminate, wait_for_exit
+from .recording import STOP_TIMEOUT
 
 logger = get_logger("browser.launcher")
 
@@ -63,7 +64,15 @@ class BrowserLauncher:
         self._launch_results: dict[str, _LaunchResult] = {}
         self._busy: set[str] = set()
         self._controls: dict[str, tuple[int, str]] = {}
+        # Profiles whose runner may be recording a video, so that stopping one
+        # saves it first while profiles that never record stop as before.
+        self._recording: set[str] = set()
         atexit.register(self.shutdown_all)
+
+    def _forget_control(self, profile_name: str) -> None:
+        """Drop a finished session's control channel. Call with self._lock held."""
+        self._controls.pop(profile_name, None)
+        self._recording.discard(profile_name)
 
     @contextlib.contextmanager
     def exclusive(self, profile_name: str) -> Iterator[None]:
@@ -142,7 +151,7 @@ class BrowserLauncher:
                 with self._lock:
                     # A newer launch may already own this name; leave it alone.
                     if self._stop_notifiers.get(profile.name) is stop_event:
-                        self._controls.pop(profile.name, None)
+                        self._forget_control(profile.name)
                         self._active_sessions.pop(profile.name, None)
                         self._stop_notifiers.pop(profile.name, None)
                 log_callback(get_string("session_ended", name=profile.name))
@@ -194,12 +203,15 @@ class BrowserLauncher:
         return True
 
     def stop_profile(self, profile_name: str, timeout: int = 2) -> bool:
+        # Save a running recording while the browser can still finish it: the
+        # terminate window below is short, and a hard kill on Windows.
+        self.finish_recording(profile_name)
         with self._lock:
             if profile_name not in self._active_sessions:
                 return False
             proc = self._active_sessions.pop(profile_name)
             notifier = self._stop_notifiers.pop(profile_name, None)
-            self._controls.pop(profile_name, None)
+            self._forget_control(profile_name)
         if notifier:
             notifier.set()
         terminate(proc, profile_name, timeout)
@@ -221,10 +233,51 @@ class BrowserLauncher:
         if endpoint is None:
             # Process is up but has not announced its control channel yet.
             raise BrowserControlError("Browser is still starting", status=503)
-        port, token = endpoint
+        if action == "record_start":
+            # Marked before sending, so a stop racing this start still saves it.
+            self._track_recording(profile_name, True)
+        try:
+            result = self._send(*endpoint, action, params or {}, timeout)
+        except BrowserControlError as e:
+            # On a timeout (504) the runner may still be starting or stopping, so the
+            # mark stays and a stop asks the runner. A 409 on start means another
+            # recording is running. Any other error means nothing is recording.
+            unknown = e.status == 504 or (action == "record_start" and e.status == 409)
+            if action in ("record_start", "record_stop") and not unknown:
+                self._track_recording(profile_name, False)
+            raise
+        if action == "record_stop":
+            self._track_recording(profile_name, False)
+        elif action == "record_status":
+            self._track_recording(profile_name, bool(result.get("recording")))
+        return result
+
+    def finish_recording(self, profile_name: str) -> dict[str, Any] | None:
+        """Stop and save the profile's recording if one may be running. Never raises."""
+        with self._lock:
+            if profile_name not in self._recording:
+                return None
+        try:
+            return self.control(
+                profile_name, "record_stop", {"if_active": True}, timeout=STOP_TIMEOUT
+            )
+        except BrowserControlError as e:
+            logger.warning("Could not save the recording of %s: %s", profile_name, e)
+            return None
+
+    def _track_recording(self, profile_name: str, recording: bool) -> None:
+        with self._lock:
+            if recording and profile_name in self._controls:
+                self._recording.add(profile_name)
+            elif not recording:
+                self._recording.discard(profile_name)
+
+    def _send(
+        self, port: int, token: str, action: str, params: dict[str, Any], timeout: float
+    ) -> Any:
         request = urllib.request.Request(
             f"http://127.0.0.1:{port}/action",
-            data=json.dumps({"action": action, "params": params or {}}).encode(),
+            data=json.dumps({"action": action, "params": params}).encode(),
             headers={"Content-Type": "application/json", TOKEN_HEADER: token},
             method="POST",
         )
@@ -244,7 +297,7 @@ class BrowserLauncher:
             for n in stale:
                 self._active_sessions.pop(n, None)
                 self._stop_notifiers.pop(n, None)
-                self._controls.pop(n, None)
+                self._forget_control(n)
             return set(self._active_sessions.keys())
 
     def running_count(self) -> int:
@@ -258,7 +311,7 @@ class BrowserLauncher:
                 return True
             del self._active_sessions[profile_name]
             self._stop_notifiers.pop(profile_name, None)
-            self._controls.pop(profile_name, None)
+            self._forget_control(profile_name)
             return False
 
     def _monitor_process(

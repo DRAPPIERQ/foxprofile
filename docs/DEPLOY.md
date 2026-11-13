@@ -70,6 +70,16 @@ systemctl restart foxprofile
 
 Chạy `git` bằng root trên thư mục của user `foxprofile` sẽ bị từ chối ("dubious ownership"), nên luôn dùng `runuser`.
 
+## Video quay từ tab
+
+Video quay qua API/MCP (`browser_record_start` / `browser_record_stop`) nằm trong `/opt/foxprofile/app/recordings/` (đổi bằng `FOXPROFILE_RECORDINGS_DIR`). Ai có token đều tải được chúng, video ghi lại cả các trang đang đăng nhập, và không tự bị xóa, kể cả khi xóa profile. Mỗi video tự dừng sau 60 phút hoặc khi đĩa trống còn dưới 1 GB (`FOXPROFILE_RECORDING_MAX_MINUTES`, `FOXPROFILE_RECORDING_MIN_FREE_MB`), nhưng tổng dung lượng các video thì không bị giới hạn. Xóa định kỳ những video không còn cần, ví dụ các video cũ hơn 14 ngày:
+
+```bash
+runuser -u foxprofile -- find /opt/foxprofile/app/recordings -name '*.webm' -mtime +14 -delete
+```
+
+Lần quay đầu tiên tự tải bản ffmpeg của Playwright (vài MB) vào cache của user `foxprofile`; muốn tải trước: `runuser -u foxprofile -- /opt/foxprofile/app/.venv/bin/python -m playwright install ffmpeg`.
+
 ## Lưu ý về IP của VPS
 
 IP của VPS thuộc dải datacenter. Cloudflare và nhiều trang khác nhận ra điều này, nên dù vân tay sạch và múi giờ khớp IP, Turnstile thường vẫn hiện checkbox thay vì tự qua. Profile chạy trên VPS nên dùng proxy residential hoặc 4G; nút **Kiểm tra IP** trong hộp thoại profile sẽ cảnh báo khi IP bị gắn nhãn datacenter/hosting.

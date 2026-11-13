@@ -8,6 +8,7 @@ Chạy thủ công với một FoxProfile thật (không thuộc `pytest`/CI vì
 | `control_e2e.py` | không (tự chạy launcher, headless) | điều khiển trang: navigate, snapshot, click, tab, chặn `file://` |
 | `mcp_stdio_e2e.py` | API đang chạy | MCP qua stdio (`python -m src.mcp_server`) |
 | `mcp_http_e2e.py` | API đang chạy | MCP qua HTTP tại `/mcp`, 401 khi thiếu token |
+| `recording_e2e.py` | API đang chạy | quay video qua MCP: một clip mỗi case, tải WebM, `stop_profile` lưu video đang quay (`E2E_ENGINES=camoufox,chrome`) |
 | `panel_e2e.py` | API + web panel | đăng nhập, tạo/sửa profile, xem màn hình từ xa |
 | `mcp_guide_e2e.py` | API + web panel | hộp thoại "Kết nối AI (MCP)" |
 | `detection_e2e.py headless headed` | mạng | so headless/có cửa sổ trên các trang kiểm tra bot |

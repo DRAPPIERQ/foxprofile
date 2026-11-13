@@ -74,6 +74,8 @@ class IBrowserLauncher(Protocol):
         timeout: float = 60,
     ) -> Any: ...
 
+    def finish_recording(self, profile_name: str) -> dict[str, Any] | None: ...
+
     def wait_for_launch(
         self,
         profile_name: str,

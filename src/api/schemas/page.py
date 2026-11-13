@@ -51,3 +51,11 @@ class EvaluateRequest(BaseModel):
 
 class TabNewRequest(BaseModel):
     url: str | None = None
+
+
+class RecordStartRequest(BaseModel):
+    name: str | None = Field(
+        None,
+        max_length=85,
+        description="File name: 1-80 letters, digits, '.', '_' or '-' (default: a timestamp)",
+    )

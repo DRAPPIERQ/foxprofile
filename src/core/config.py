@@ -15,6 +15,23 @@ def _env(key: str, default: str) -> str:
 
 PROFILES_FILE = _env("PROFILES_FILE", "profiles.json")
 DATA_DIR = _env("DATA_DIR", "camoufox_data")
+# Videos recorded from a profile's tab, one sub-folder per profile. Kept out of
+# DATA_DIR so that exporting a profile does not zip its videos.
+RECORDINGS_DIR = _env("RECORDINGS_DIR", "recordings")
+
+
+def _non_negative(key: str, default: float) -> float:
+    """FOXPROFILE_<key> as a number >= 0; an unreadable value falls back to `default`."""
+    try:
+        return max(0.0, float(_env(key, str(default))))
+    except ValueError:
+        return default
+
+
+# A recording stops by itself after this many minutes, or when free disk space
+# drops below this many MB (0 turns either limit off).
+RECORDING_MAX_MINUTES = _non_negative("RECORDING_MAX_MINUTES", 60)
+RECORDING_MIN_FREE_MB = _non_negative("RECORDING_MIN_FREE_MB", 1024)
 LOG_DIR = _env("LOG_DIR", "logs")
 LOG_LEVEL = _env("LOG_LEVEL", "INFO")
 PROXY_CHECK_TIMEOUT = int(_env("PROXY_TIMEOUT", "10"))

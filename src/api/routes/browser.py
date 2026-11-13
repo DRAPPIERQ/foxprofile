@@ -8,13 +8,14 @@ from ...core.config import LAUNCH_WAIT_TIMEOUT
 from ...core.logging import get_logger
 from ...services.browser.launcher import ProfileBusyError
 from ..dependencies import get_browser_launcher, get_event_bus, get_profile_manager
-from ..helpers import require_profile
+from ..helpers import require_profile, with_download
 from ..schemas.browser import (
     BrowserStatusResponse,
     LaunchResponse,
     RunningBrowsersResponse,
+    StopResponse,
 )
-from ..schemas.common import ErrorResponse, SuccessResponse
+from ..schemas.common import ErrorResponse
 
 if TYPE_CHECKING:
     from ...core.events import EventBus
@@ -113,7 +114,7 @@ def launch_browser(
 
 @router.post(
     "/{name}/stop",
-    response_model=SuccessResponse,
+    response_model=StopResponse,
     responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
 )
 def stop_browser(
@@ -121,12 +122,16 @@ def stop_browser(
     pm: IProfileManager = Depends(get_profile_manager),
     bl: IBrowserLauncher = Depends(get_browser_launcher),
     bus: EventBus = Depends(get_event_bus),
-) -> SuccessResponse:
+) -> StopResponse:
+    """Close the profile's browser. A recording still running is saved first and returned."""
     require_profile(name, pm)
     if not bl.is_running(name):
         raise HTTPException(status_code=409, detail="Browser is not running")
 
+    recording = bl.finish_recording(name)
     bl.stop_profile(name)
     logger.info("API stopped browser for: %s", name)
     bus.emit()
-    return SuccessResponse(message=f"Browser stopped for '{name}'")
+    return StopResponse(
+        message=f"Browser stopped for '{name}'", recording=with_download(name, recording)
+    )

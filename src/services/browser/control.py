@@ -15,6 +15,8 @@ from urllib.parse import unquote, urlparse
 
 from aiohttp import web
 
+from .recording import Recorder, RecordingError, scrub_paths
+
 ALLOWED_SCHEMES = ("http", "https", "about")
 MAX_FULL_PAGE_HEIGHT = 16_384
 MAX_TEXT = 40_000
@@ -22,7 +24,11 @@ TOKEN_HEADER = "X-Control-Token"
 
 
 class ControlError(Exception):
-    pass
+    """A refused action; `status` is the HTTP status the control server answers with."""
+
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 _SCHEME = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):(.*)$", re.S)
@@ -71,9 +77,10 @@ def _truncate(text: str, limit: int) -> tuple[str, bool]:
 class PageController:
     """Executes control actions against a Playwright BrowserContext."""
 
-    def __init__(self, context: Any) -> None:
+    def __init__(self, context: Any, recordings_dir: str | None = None) -> None:
         self._context = context
         self._current: Any = None
+        self._recorder = Recorder(recordings_dir) if recordings_dir else None
 
     # --- page selection ---------------------------------------------------
 
@@ -215,9 +222,35 @@ class PageController:
         if len(pages) == 1:
             # Closing the last tab closes the profile's browser.
             raise ControlError("Cannot close the last tab; stop the profile instead")
+        if self._recorder and self._recorder.is_recording(pages[index]):
+            raise ControlError("This tab is being recorded; stop the recording first", status=409)
         await pages[index].close()
         self._current = None
         return await self.tabs()
+
+    # --- recording --------------------------------------------------------
+
+    def _require_recorder(self) -> Recorder:
+        if self._recorder is None:
+            raise ControlError("Recording is not available for this browser")
+        return self._recorder
+
+    async def record_start(self, name: str | None = None) -> dict[str, Any]:
+        """Start recording the active tab as a WebM video."""
+        recorder = self._require_recorder()
+        return await recorder.start(await self._page(), name)
+
+    async def record_stop(self, if_active: bool = False) -> dict[str, Any] | None:
+        """Stop the recording and save it; with if_active, None when nothing records."""
+        return await self._require_recorder().stop(if_active=if_active)
+
+    async def record_status(self) -> dict[str, Any]:
+        return self._require_recorder().status()
+
+    async def finish_recording(self) -> None:
+        """Save a recording still running when the browser shuts down."""
+        if self._recorder:
+            await self._recorder.finish()
 
     ACTIONS = (
         "navigate",
@@ -236,6 +269,9 @@ class PageController:
         "tab_new",
         "tab_select",
         "tab_close",
+        "record_start",
+        "record_stop",
+        "record_status",
     )
 
     async def dispatch(self, action: str, params: dict[str, Any]) -> Any:
@@ -254,10 +290,11 @@ def build_app(controller: PageController, token: str) -> web.Application:
         try:
             body = await request.json()
             result = await controller.dispatch(body.get("action", ""), body.get("params") or {})
-        except ControlError as e:
-            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except (ControlError, RecordingError) as e:
+            return web.json_response({"ok": False, "error": scrub_paths(str(e))}, status=e.status)
         except Exception as e:  # Playwright timeouts, navigation errors, JS errors
-            message = " ".join(str(e).split())
+            # Error text goes to API and MCP clients: no local paths.
+            message = scrub_paths(" ".join(str(e).split()))
             if "Call log:" in message:
                 message = message.split("Call log:", 1)[0].strip()
             return web.json_response(
@@ -266,15 +303,22 @@ def build_app(controller: PageController, token: str) -> web.Application:
             )
         return web.json_response({"ok": True, "result": result})
 
+    async def save_recording(_app: web.Application) -> None:
+        # The runners clean this server up before closing the browser, so a
+        # recording still running when the profile stops is saved here.
+        await controller.finish_recording()
+
     app = web.Application(client_max_size=4 * 1024 * 1024)
     app.router.add_post("/action", handle)
+    app.on_cleanup.append(save_recording)
     return app
 
 
-async def serve(context: Any) -> tuple[web.AppRunner, int, str]:
+async def serve(context: Any, recordings_dir: str | None = None) -> tuple[web.AppRunner, int, str]:
     """Start the control server for a context. Returns (runner, port, token)."""
     token = secrets.token_urlsafe(24)
-    runner = web.AppRunner(build_app(PageController(context), token), access_log=None)
+    controller = PageController(context, recordings_dir)
+    runner = web.AppRunner(build_app(controller, token), access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()

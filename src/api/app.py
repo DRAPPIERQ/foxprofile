@@ -13,12 +13,14 @@ from ..core.logging import get_logger
 from . import mcp_http
 from .auth import require_token
 from .guard import LocalOnlyGuard
+from .helpers import API_PREFIX
 from .routes import (
     browser_router,
     mcp_setup_router,
     page_router,
     profiles_router,
     proxy_router,
+    recordings_router,
 )
 from .schemas.common import SuccessResponse
 
@@ -27,7 +29,6 @@ if TYPE_CHECKING:
 
 logger = get_logger("api")
 
-API_PREFIX = "/api/v1"
 VERSION = "2.4.0"
 _PANEL = pathlib.Path(__file__).resolve().parents[1] / "web" / "index.html"
 _FONTS = pathlib.Path(__file__).resolve().parents[1] / "assets" / "fonts"
@@ -69,6 +70,7 @@ def create_app(container: Container, self_url: str | None = None) -> FastAPI:
     app.include_router(profiles_router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(browser_router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(page_router, prefix=API_PREFIX, dependencies=protected)
+    app.include_router(recordings_router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(proxy_router, prefix=API_PREFIX, dependencies=protected)
     app.include_router(mcp_setup_router, prefix=API_PREFIX, dependencies=protected)
     app.router.routes.append(mcp_route)
