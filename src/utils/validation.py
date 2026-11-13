@@ -25,7 +25,21 @@ _PROXY_PATTERN = re.compile(
 _LOCALE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?-(?:[A-Z]{2}|\d{3})$")
 
 
-def validate_profile_name(name: str) -> tuple[bool, str]:
+def is_reserved_name(name: str, with_extension: bool = True) -> bool:
+    """True for a Windows device name ("CON", "com1") and, with `with_extension`, for one
+    followed by an extension ("NUL.txt", "con.shop"), which Windows also treats as the device."""
+    if name.upper() in _RESERVED_NAMES:
+        return True
+    return with_extension and name.split(".")[0].rstrip().upper() in _RESERVED_NAMES
+
+
+def validate_profile_name(name: str, existing: bool = False) -> tuple[bool, str]:
+    """Check a profile name, which becomes a directory name.
+
+    `existing=True` is for names already in profiles.json: it skips the rule added
+    later for Windows device names with an extension ("CON.txt"), so that loading
+    does not drop a profile that works on Linux or macOS.
+    """
     if not name:
         return False, get_string("validation_empty_name")
 
@@ -50,7 +64,9 @@ def validate_profile_name(name: str) -> tuple[bool, str]:
     if name.endswith("."):
         return False, get_string("validation_trailing_dot")
 
-    if name.upper() in _RESERVED_NAMES:
+    # A device name with an extension ("con.shop") cannot be a folder on Windows, so new
+    # profiles may not use one; stored ones keep working where they were made.
+    if is_reserved_name(name, with_extension=not existing):
         return False, get_string("validation_reserved_name", name=name)
 
     return True, ""

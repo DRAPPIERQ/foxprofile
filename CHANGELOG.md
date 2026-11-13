@@ -6,6 +6,7 @@
 
 ### Sửa
 - Chụp màn hình qua API/MCP không còn đổi style của ô đang được focus ở mỗi lần chụp (trang web nhìn thấy được thay đổi đó).
+- Tên profile mới như `CON.txt` hay `nul.shop` bị từ chối: Windows coi chúng là thiết bị nên không tạo được thư mục. Profile đã có tên như vậy (tạo trên Linux/macOS) vẫn được nạp, sửa và nhập lại trên Linux/macOS bình thường.
 
 ## [2.4.0] - 2026-10-30
 

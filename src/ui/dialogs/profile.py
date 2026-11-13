@@ -133,7 +133,9 @@ def open_profile_dialog(
         locale = (locale_field.value or "").strip()
         name_error.visible = proxy_error.visible = geo_error.visible = False
 
-        valid_name, name_err = validate_profile_name(name)
+        # An unchanged name is checked as an existing one (see validate_profile_name).
+        unchanged = is_edit and name == profile.name
+        valid_name, name_err = validate_profile_name(name, existing=unchanged)
         if not valid_name:
             name_error.value = name_err
             name_error.visible = True

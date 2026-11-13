@@ -63,7 +63,10 @@ class ProfileManager:
                 with pathlib.Path(PROFILES_FILE).open(encoding="utf-8") as f:
                     data = json.load(f)
                     for name, p_data in data.items():
-                        if not validate_profile_name(name)[0] or p_data.get("name") != name:
+                        if (
+                            not validate_profile_name(name, existing=True)[0]
+                            or p_data.get("name") != name
+                        ):
                             logger.warning("Skipping profile with unsafe name: %r", name)
                             continue
                         clean_data = {
