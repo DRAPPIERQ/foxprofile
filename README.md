@@ -65,6 +65,7 @@ FoxProfile is free and open source, built in my spare time, and will stay that w
 - **Filters and search**: filter by running, with/without proxy and Chrome engine (with counts); search by name or proxy.
 - **Bulk actions**: launch, stop or delete many profiles at once.
 - **MCP server** so AI agents (Claude, Cursor...) can launch profiles, browse, click, type and take screenshots.
+- **Tab video recording** through the API and MCP: one WebM clip per test case, to hand a QA run over as video.
 - **Server mode + web panel** for VPS deployments: manage profiles and view their screens remotely, protected by a token.
 - **REST API** with Swagger docs for scripting.
 - **English** (default) and Vietnamese UI, switchable inside the app. Fonts are bundled, no network needed.
@@ -139,7 +140,7 @@ Full deployment guide (Ubuntu, systemd, nginx, HTTPS; in Vietnamese): [docs/DEPL
 
 ## MCP: let AI agents drive the browser
 
-FoxProfile ships an MCP server so Claude Code, Claude Desktop, Cursor, VS Code and others can manage profiles and act on pages: navigate, read, click, type, screenshot.
+FoxProfile ships an MCP server so Claude Code, Claude Desktop, Cursor, VS Code and others can manage profiles and act on pages: navigate, read, click, type, screenshot, record a video.
 
 **Quickest:** click **Connect AI (MCP)** in the left sidebar of the desktop app or the web panel. It generates ready-to-paste configs for each AI app with your address and token.
 
@@ -169,8 +170,21 @@ Then just ask, e.g. *"Open profile tiktok-us-02, go to tiktok.com and send me a 
 | Cookies & fingerprints | `export_cookies`, `import_cookies`, `get_fingerprint`, `reset_fingerprint`, `check_proxy`, `check_profile_ip` |
 | Page | `browser_navigate`, `browser_back`, `browser_snapshot`, `browser_get_text`, `browser_click`, `browser_click_at`, `browser_type`, `browser_press`, `browser_wait_for`, `browser_screenshot`, `browser_evaluate` |
 | Tabs | `browser_tabs`, `browser_tab_new`, `browser_tab_select`, `browser_tab_close` |
+| Recording | `browser_record_start`, `browser_record_stop` |
 
 There is deliberately **no** delete tool, so an agent cannot wipe an account's cookies by mistake. Only `http`, `https` and `about:blank` can be opened; `file://` and `about:config` are blocked.
+
+### Recording a test case as a video
+
+`browser_record_start(profile, name)` starts recording the active tab; `browser_record_stop(profile)` saves it as `recordings/<profile>/<name>.webm` and returns that path (relative to the folder FoxProfile runs from), the duration and a download link (`GET /api/v1/recordings/<profile>/<name>.webm`, same token as the API). A profile records one video at a time, so a QA run gets one clip per case. Recording uses Playwright's screencast: the browser sends its own frames (25 fps, the tab's size up to 1920×1080), nothing is added to the page, and it works with both engines.
+
+- Only the tab that was active at the start is recorded. That tab cannot be closed through the API while it records; if it closes anyway, FoxProfile still tries to save the video up to that moment.
+- `stop_profile` saves a recording that is still running and returns it.
+- A recording stops by itself after 60 minutes, or when free disk space drops below 1 GB (`FOXPROFILE_RECORDING_MAX_MINUTES`, `FOXPROFILE_RECORDING_MIN_FREE_MB`); the next `browser_record_stop` returns it with `stopped_by`.
+- The first recording downloads Playwright's ffmpeg build (a few MB, from Playwright's CDN; progress shows in the log). To fetch it ahead of time: `python -m playwright install ffmpeg`.
+- Videos show whatever the page showed, logged-in accounts included, and they are kept when a profile is deleted. Treat `recordings/` like `camoufox_data/`: FoxProfile creates it readable by its own user only.
+
+For example: *"Launch profile qa-01, start recording as login-ok, log in on staging.example.com, then stop the recording and give me the file"*.
 
 ## Chrome engine
 
@@ -204,6 +218,9 @@ Everything is optional. To override defaults, copy `.env.example` to `.env`.
 | `FOXPROFILE_LANG` | `en` | UI language: `en` or `vi` |
 | `FOXPROFILE_PROFILES_FILE` | `profiles.json` | Profile list file |
 | `FOXPROFILE_DATA_DIR` | `camoufox_data` | Data directory, one subdirectory per profile |
+| `FOXPROFILE_RECORDINGS_DIR` | `recordings` | Recorded videos, one subdirectory per profile. An absolute path also makes the API return absolute video paths |
+| `FOXPROFILE_RECORDING_MAX_MINUTES` | `60` | A recording stops by itself after this many minutes (`0`: no limit) |
+| `FOXPROFILE_RECORDING_MIN_FREE_MB` | `1024` | A recording does not start, or stops, below this much free space in the recordings folder; the temporary folder only has to be not nearly full (`0`: no check) |
 | `FOXPROFILE_LOG_DIR` | `logs` | Log directory |
 | `FOXPROFILE_LOG_LEVEL` | `INFO` | Log level |
 | `FOXPROFILE_PROXY_TIMEOUT` | `10` | Proxy check timeout (seconds) |
@@ -226,11 +243,12 @@ camoufox_data/<profile>/                       browser data: cookies, history, l
 camoufox_data/<profile>/fingerprint.json       device fingerprint (Camoufox engine)
 camoufox_data/<profile>/chrome_persona.json    device fingerprint (Chrome engine)
 camoufox_data/<profile>/tabs.json              tabs to reopen on next launch
+recordings/<profile>/<name>.webm               videos recorded through the API / MCP
 logs/foxprofile_YYYYMMDD.log                   daily log
 ```
 
 > [!WARNING]
-> `camoufox_data/` holds the login cookies of every account. Never commit or share it.
+> `camoufox_data/` holds the login cookies of every account, and `recordings/` shows what their pages displayed. Never commit or share them.
 
 ## REST API
 
@@ -251,7 +269,7 @@ Prefix `/api/v1`. The full reference is at `/docs` while the app is running.
 | `GET` | `/browser` | Running profiles |
 | `GET` | `/browser/{name}/status` | Whether the profile is running |
 | `POST` | `/browser/{name}/launch` | Launch and wait until ready or failed (409 if already running or busy) |
-| `POST` | `/browser/{name}/stop` | Stop |
+| `POST` | `/browser/{name}/stop` | Stop (a recording still running is saved first and returned) |
 | `POST` | `/proxy/check` | Check a proxy |
 | `POST` | `/proxy/geo-check` | Same as `ip-check` for an unsaved `{proxy, timezone, locale}` |
 | `POST` | `/browser/{name}/page/navigate` · `back` | Open a URL in the active tab, go back |
@@ -262,6 +280,9 @@ Prefix `/api/v1`. The full reference is at `/docs` while the app is running.
 | `POST` | `/browser/{name}/page/evaluate` | Run JavaScript |
 | `GET` / `POST` | `/browser/{name}/page/tabs` | List tabs / open a new tab |
 | `POST` / `DELETE` | `/browser/{name}/page/tabs/{index}/select` · `/page/tabs/{index}` | Select / close a tab |
+| `POST` | `/browser/{name}/page/record/start` · `record/stop` | Start recording the active tab (`{"name": "case-1"}`) / stop and save it as WebM |
+| `GET` | `/browser/{name}/page/record` | Whether a recording is running |
+| `GET` | `/recordings/{name}/{file}` | Download a recording |
 | `GET` | `/mcp/setup?base_url=...` | MCP configs for each AI app (used by the Connect AI dialog) |
 
 With `FOXPROFILE_API_TOKEN` set, every request except `/health` and `/info` needs `Authorization: Bearer <token>`.
@@ -280,6 +301,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/browser/tiktok-us-02/launch
 
 # Export cookies as cookies.txt
 curl "http://127.0.0.1:8000/api/v1/profiles/tiktok-us-02/cookies?format=netscape" -o cookies.txt
+
+# Record a test case as a video, then download it
+curl -X POST http://127.0.0.1:8000/api/v1/browser/tiktok-us-02/page/record/start \
+  -H "Content-Type: application/json" -d '{"name": "login-ok"}'
+curl -X POST http://127.0.0.1:8000/api/v1/browser/tiktok-us-02/page/record/stop
+curl http://127.0.0.1:8000/api/v1/recordings/tiktok-us-02/login-ok.webm -o login-ok.webm
 ```
 
 ## Development

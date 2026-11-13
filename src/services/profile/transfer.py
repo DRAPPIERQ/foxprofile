@@ -84,7 +84,9 @@ def import_from_zip(
 
             if not name:
                 return False, "Invalid profile data (missing name)"
-            valid, msg = validate_profile_name(name)
+            # A name like "nul.shop" (made on Linux or macOS) imports where such a
+            # folder works; Windows refuses it as a reserved name.
+            valid, msg = validate_profile_name(name, existing=os.name != "nt")
             if not valid:
                 return False, f"Invalid profile name in archive: {msg}"
 

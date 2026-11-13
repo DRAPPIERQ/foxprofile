@@ -23,6 +23,7 @@ from chrome_engine import fetch
 from chrome_engine.engine import ChromeEngine
 from src.core.config import DATA_DIR, HEADLESS, RESTORE_TABS
 from src.services.browser import control, session
+from src.services.browser.recording import recordings_dir
 from src.services.browser.runner import restore_tabs, snapshot_tabs
 
 _shutdown = asyncio.Event()
@@ -125,7 +126,7 @@ async def run_browser(
         context.on("page", watch)
         context.on("close", lambda _: close_event.set())
 
-        control_runner, port, token = await control.serve(context)
+        control_runner, port, token = await control.serve(context, recordings_dir(profile_name))
         # CONTROL must precede BROWSER_STARTED (see the Camoufox runner).
         _say(f"CONTROL:{port}:{token}")
         _say("BROWSER_STARTED")

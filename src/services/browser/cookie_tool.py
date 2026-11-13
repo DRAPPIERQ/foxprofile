@@ -66,7 +66,7 @@ def main() -> int:
 
     action, profile_name, os_type = sys.argv[1:4]
     engine = sys.argv[4] if len(sys.argv) == 5 else "camoufox"
-    valid, msg = validate_profile_name(profile_name)
+    valid, msg = validate_profile_name(profile_name, existing=True)
     if not valid or os_type not in ("windows", "macos", "linux") or engine not in ENGINES:
         print("RESULT:" + json.dumps({"error": msg or f"invalid os/engine {os_type!r}/{engine!r}"}))
         return 2

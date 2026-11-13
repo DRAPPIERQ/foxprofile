@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Thêm
+- Quay video tab qua REST API và MCP (`browser_record_start` / `browser_record_stop`): mỗi test case một file WebM trong `recordings/<profile>/` (đổi bằng `FOXPROFILE_RECORDINGS_DIR`), tải về qua `GET /api/v1/recordings/<profile>/<file>`. Dùng screencast của Playwright, chạy với cả hai engine và không chèn gì vào trang. Lần quay đầu tiên tự tải bản ffmpeg của Playwright (vài MB). `stop_profile` lưu video đang quay dở trước khi đóng trình duyệt. Video tự dừng sau 60 phút hoặc khi đĩa trống còn dưới 1 GB (`FOXPROFILE_RECORDING_MAX_MINUTES`, `FOXPROFILE_RECORDING_MIN_FREE_MB`).
+
+### Sửa
+- Chụp màn hình qua API/MCP không còn đổi style của ô đang được focus ở mỗi lần chụp (trang web nhìn thấy được thay đổi đó).
+- Tên profile mới như `CON.txt` hay `nul.shop` bị từ chối: Windows coi chúng là thiết bị nên không tạo được thư mục. Profile đã có tên như vậy (tạo trên Linux/macOS) vẫn được nạp, sửa và nhập lại trên Linux/macOS bình thường.
+
 ## [2.4.0] - 2026-10-30
 
 ### Thay đổi

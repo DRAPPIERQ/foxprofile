@@ -16,6 +16,7 @@ from src.core.config import DATA_DIR, HEADLESS, RESTORE_TABS
 from src.services.browser import control, session
 from src.services.browser import display as xvfb
 from src.services.browser.fingerprint import load_or_create
+from src.services.browser.recording import recordings_dir
 from src.services.proxy.geo_check import requests_proxy_url
 from src.utils.proxy_parser import parse_proxy
 
@@ -237,7 +238,7 @@ async def run_browser(
             context.on("page", watch)
             context.on("close", lambda: close_event.set())
 
-            control_runner, port, token = await control.serve(context)
+            control_runner, port, token = await control.serve(context, recordings_dir(profile_name))
             # CONTROL must precede BROWSER_STARTED: the launcher reports the
             # profile ready on BROWSER_STARTED and callers may control it at once.
             _safe_print(f"CONTROL:{port}:{token}")

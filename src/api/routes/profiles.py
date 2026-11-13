@@ -160,7 +160,7 @@ def update_profile(
     new_locale = supplied.get("locale", profile.locale)
 
     if "name" in supplied:
-        valid, msg = validate_profile_name(new_name)
+        valid, msg = validate_profile_name(new_name, existing=new_name == name)
         if not valid:
             raise HTTPException(status_code=400, detail=msg)
         if new_name != name and bl.is_running(name):

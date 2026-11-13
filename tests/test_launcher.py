@@ -4,7 +4,8 @@ import pytest
 
 from src.models.profile import Profile
 from src.services.browser import launcher as launcher_mod
-from src.services.browser.launcher import BrowserLauncher, ProfileBusyError
+from src.services.browser.launcher import BrowserControlError, BrowserLauncher, ProfileBusyError
+from src.services.browser.recording import STOP_TIMEOUT
 from src.ui.actions.browser import launch_or_stop
 from src.ui.state import AppState
 
@@ -145,3 +146,95 @@ def test_api_launch_answers_409_when_the_browser_appeared_meanwhile(tmp_path, mo
 
     assert r.status_code == 409
     assert r.json()["detail"] == "Browser already running"
+
+
+# --- recordings --------------------------------------------------------------
+
+
+def _with_control(bl, name="p"):
+    """A running profile whose control channel answers through a fake `_send`."""
+    bl.start_thread(Profile(name=name), lambda m: None)
+    bl._controls[name] = (1, "tok")
+    sent, responses = [], {}
+
+    def send(port, token, action, params, timeout):
+        sent.append((action, params, timeout))
+        response = responses.get(action)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    bl._send = send
+    return sent, responses
+
+
+def test_profiles_that_never_record_stop_without_asking_the_runner(bl, monkeypatch):
+    sent, _ = _with_control(bl)
+    monkeypatch.setattr(launcher_mod, "terminate", lambda *a, **k: None)
+    assert bl.stop_profile("p") is True
+    assert sent == []
+
+
+def test_stop_saves_a_running_recording_before_terminating(bl, monkeypatch):
+    sent, responses = _with_control(bl)
+    responses["record_start"] = {"file": "a.webm"}
+    responses["record_stop"] = {"file": "a.webm", "bytes": 10}
+    bl.control("p", "record_start", {"name": "a"})
+    order = []
+    monkeypatch.setattr(launcher_mod, "terminate", lambda *a, **k: order.append("terminate"))
+    send = bl._send
+    bl._send = lambda *a: order.append(a[2]) or send(*a)
+    assert bl.stop_profile("p") is True
+    assert order == ["record_stop", "terminate"]
+    assert sent[-1] == ("record_stop", {"if_active": True}, STOP_TIMEOUT)
+
+
+def test_finish_recording_never_raises(bl):
+    _, responses = _with_control(bl)
+    responses["record_start"] = {"file": "a.webm"}
+    bl.control("p", "record_start", {})
+    responses["record_stop"] = BrowserControlError("Browser did not respond", status=504)
+    assert bl.finish_recording("p") is None
+
+
+def test_recording_tracking_follows_the_runner(bl):
+    _, responses = _with_control(bl)
+
+    def attempt(action, error):
+        responses[action] = error
+        with pytest.raises(BrowserControlError):
+            bl.control("p", action, {})
+        return "p" in bl._recording
+
+    # A start that timed out may still have started (e.g. after downloading ffmpeg),
+    # and a 409 means another recording is running: both keep the mark.
+    assert attempt("record_start", BrowserControlError("did not respond", status=504))
+    assert attempt("record_start", BrowserControlError("already running", status=409))
+    # A stop that timed out may still be saving; any other answer means nothing records.
+    assert attempt("record_stop", BrowserControlError("did not respond", status=504))
+    assert not attempt("record_stop", BrowserControlError("produced no file", status=422))
+    # A start the runner refused leaves nothing recording.
+    assert not attempt("record_start", BrowserControlError("Invalid name", status=400))
+    responses["record_status"] = {"recording": True}
+    bl.control("p", "record_status", {})
+    assert "p" in bl._recording
+    with bl._lock:  # the session ending forgets it
+        bl._forget_control("p")
+    assert "p" not in bl._recording
+
+
+def test_a_stop_racing_a_start_still_saves_the_recording(bl):
+    _, responses = _with_control(bl)
+    seen_during_start = []
+    send = bl._send
+
+    def slow_start(port, token, action, params, timeout):
+        if action == "record_start":
+            # stop_profile could run now, while the runner is starting the recording.
+            seen_during_start.append("p" in bl._recording)
+        return send(port, token, action, params, timeout)
+
+    bl._send = slow_start
+    responses["record_start"] = {"file": "a.webm"}
+    bl.control("p", "record_start", {})
+    assert seen_during_start == [True]

@@ -70,7 +70,7 @@ async def main():
         init = await session.initialize()
         check("MCP initialize", init.serverInfo.name == "foxprofile", init.serverInfo)
         tools = (await session.list_tools()).tools
-        check("MCP lists 27 tools", len(tools) == 27, len(tools))
+        check("MCP lists 30 tools", len(tools) == 30, len(tools))
 
         async def call(tool, **args):
             r = await session.call_tool(tool, args)
