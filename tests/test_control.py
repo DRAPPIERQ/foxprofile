@@ -122,3 +122,18 @@ def test_percent_encoded_blocked_schemes(url):
 def test_malformed_url_is_a_control_error(url):
     with pytest.raises(ControlError):
         _check_url(url)
+
+
+def test_screenshots_leave_the_caret_alone():
+    """Playwright's default caret="hide" restyles the focused field, which pages can see."""
+    calls = []
+
+    class ShotPage(FakePage):
+        async def screenshot(self, **kwargs):
+            calls.append(kwargs)
+            return b"\x89PNG"
+
+    ctx = FakeContext()
+    ctx.pages = [ShotPage()]
+    run(PageController(ctx).dispatch("screenshot", {}))
+    assert calls == [{"full_page": False, "type": "png", "caret": "initial"}]

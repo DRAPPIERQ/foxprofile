@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Sửa
+- Chụp màn hình qua API/MCP không còn đổi style của ô đang được focus ở mỗi lần chụp (trang web nhìn thấy được thay đổi đó).
+
 ## [2.4.0] - 2026-10-30
 
 ### Thay đổi

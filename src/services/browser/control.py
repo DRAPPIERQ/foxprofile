@@ -175,7 +175,9 @@ class PageController:
                     f"Page is {height}px tall; full-page screenshots are limited to "
                     f"{MAX_FULL_PAGE_HEIGHT}px. Scroll and take viewport screenshots instead.",
                 )
-        png = await page.screenshot(full_page=full_page, type="png")
+        # caret="initial": Playwright's default ("hide") changes the focused field's
+        # style for every screenshot, which the page can observe.
+        png = await page.screenshot(full_page=full_page, type="png", caret="initial")
         return {**await self._describe(page), "png_base64": base64.b64encode(png).decode()}
 
     async def evaluate(self, script: str) -> dict[str, Any]:
